@@ -5,5 +5,5 @@ jobs:
         uses: asherikov/sharf/.github/workflows/test.yaml@main
         with:
             sharf_ref: main
-            package_url: ${{ github.server_url }}/${{ github.repository }}.git
+            package_github_repo: ${{ github.repository }}
             package_version: ${{ github.sha }}
