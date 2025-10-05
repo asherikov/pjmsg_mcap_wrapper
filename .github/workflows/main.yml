@@ -2,7 +2,7 @@ on: [push, pull_request]
 
 jobs:
     tests:
-        uses: asherikov/sharf/.github/workflows/test.yaml@main
+        uses: asherikov/ccws/.github/workflows/reusable_test.yaml@master
         with:
             distro: noble
             workspace_github_repo: asherikov/sharf
