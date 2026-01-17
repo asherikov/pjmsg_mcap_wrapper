@@ -28,6 +28,8 @@ if(CCWS_CLANG_TIDY)
     set(CMAKE_CXX_CLANG_TIDY "${CCWS_CLANG_TIDY}" CACHE STRING "" FORCE)
 endif()
 
+# Option to build the reader library
+option(BUILD_READER "Build the MCAP reader library" ON)
 
 add_library(${PROJECT_NAME} SHARED
     src/writer.cpp
@@ -48,12 +50,43 @@ target_include_directories(${PROJECT_NAME}
 set_property(TARGET ${PROJECT_NAME} PROPERTY INTERFACE_${PROJECT_NAME}_MAJOR_VERSION ${PROJECT_VERSION_MAJOR})
 set_property(TARGET ${PROJECT_NAME} APPEND PROPERTY COMPATIBLE_INTERFACE_STRING ${PROJECT_VERSION_MAJOR})
 
+# Reader library (optional)
+if(BUILD_READER)
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(LZ4 REQUIRED liblz4)
+    pkg_check_modules(ZSTD REQUIRED libzstd)
+
+    add_library(${PROJECT_NAME}_reader SHARED
+        src/reader.cpp
+    )
+    target_link_libraries(${PROJECT_NAME}_reader
+        PUBLIC ${PROJECT_NAME}
+        PRIVATE fastcdr
+        PRIVATE ${LZ4_LIBRARIES}
+        PRIVATE ${ZSTD_LIBRARIES}
+    )
+    target_include_directories(${PROJECT_NAME}_reader SYSTEM PUBLIC
+        $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:include>
+    )
+    target_include_directories(${PROJECT_NAME}_reader
+        SYSTEM
+        PRIVATE include/${PROJECT_NAME}/generated/
+        PRIVATE src/3rdparty/mcap/cpp/mcap/include/
+        PRIVATE src/3rdparty/generated/
+    )
+    set_property(TARGET ${PROJECT_NAME}_reader PROPERTY INTERFACE_${PROJECT_NAME}_MAJOR_VERSION ${PROJECT_VERSION_MAJOR})
+    set_property(TARGET ${PROJECT_NAME}_reader APPEND PROPERTY COMPATIBLE_INTERFACE_STRING ${PROJECT_VERSION_MAJOR})
+
+    set(READER_TARGET ${PROJECT_NAME}_reader)
+endif()
+
 install(
-    TARGETS ${PROJECT_NAME} EXPORT ${PROJECT_NAME}
+    TARGETS ${PROJECT_NAME} ${READER_TARGET} EXPORT ${PROJECT_NAME}
     INCLUDES DESTINATION include
 )
 
-install(TARGETS ${PROJECT_NAME}
+install(TARGETS ${PROJECT_NAME} ${READER_TARGET}
     ARCHIVE DESTINATION lib
     LIBRARY DESTINATION lib
     RUNTIME DESTINATION bin
