@@ -38,6 +38,22 @@ namespace
 
 namespace pjmsg_mcap_wrapper
 {
+  /// Internal event type for decoding - represents exactly one decoded MCAP message
+  struct ExtractedEvent {
+    enum class Type {
+      Names,
+      Values
+    };
+
+    Type type;
+    mcap::ChannelId channel_id;
+    uint64_t log_time; // from MCAP
+    uint64_t pub_time; // from MCAP publishTime
+
+    plotjuggler_msgs::msg::StatisticsNames names;
+    plotjuggler_msgs::msg::StatisticsValues values;
+  };
+
   class Reader::Implementation
   {
   protected:
@@ -46,11 +62,10 @@ namespace pjmsg_mcap_wrapper
     {
     public:
       mcap::ChannelId channel_id_;
-      bool has_data_;
       t_Message message_;
 
     public:
-      Channel() : channel_id_(0), has_data_(false) {}
+      Channel() : channel_id_(0) {}
 
       void setChannelId(const mcap::ChannelId id) { channel_id_ = id; }
 
@@ -64,8 +79,6 @@ namespace pjmsg_mcap_wrapper
 
         deser.read_encapsulation();
         deser >> message_;
-
-        has_data_ = true;
       }
 
       const t_Message& getMessage() const { return message_; }
@@ -79,11 +92,8 @@ namespace pjmsg_mcap_wrapper
     std::unique_ptr<mcap::LinearMessageView> message_view_;
     std::optional<mcap::LinearMessageView::Iterator> current_message_;
 
-    uint32_t current_names_version_;
-    bool names_updated_;
-
   public:
-    Implementation() : current_names_version_(0), names_updated_(false) {}
+    Implementation() = default;
 
     ~Implementation()
     {
@@ -102,6 +112,12 @@ namespace pjmsg_mcap_wrapper
       const mcap::Status res = reader_.open(file_stream_);
       if (not res.ok()) {
         throw std::runtime_error(str_concat("Failed to open MCAP file: ", res.message));
+      }
+
+      // Read the summary section to populate internal indexes (channels, schemas, etc.)
+      const mcap::Status summary_res = reader_.readSummary(mcap::ReadSummaryMethod::AllowFallbackScan);
+      if (not summary_res.ok()) {
+        throw std::runtime_error(str_concat("Failed to read MCAP summary: ", summary_res.message));
       }
 
       // Map channel names to channel IDs
@@ -124,62 +140,85 @@ namespace pjmsg_mcap_wrapper
       current_message_ = message_view_->begin();
     }
 
-    template <class t_Message>
-    void readIfMatches(const mcap::Message& mcap_message)
-    {
-      if (std::get<Channel<t_Message>>(channels_).matches(mcap_message.channelId)) {
-        std::get<Channel<t_Message>>(channels_).read(mcap_message);
-      }
-    }
-
     bool hasNext() const { return (message_view_ && current_message_.has_value() && *current_message_ != message_view_->end()); }
 
-    bool read(Message& message)
+    /// Returns exactly one decoded MCAP message
+    /// Skips unrelated channels
+    bool readNextInternal(ExtractedEvent& out)
     {
-      if (not hasNext()) {
+      while (hasNext()) {
+        const mcap::MessageView& mv = **current_message_;
+        const auto& msg = mv.message;
+
+        out.channel_id = msg.channelId;
+        out.log_time = msg.logTime;
+        out.pub_time = msg.publishTime;
+
+        // Check if this is a Names message
+        if (std::get<Channel<plotjuggler_msgs::msg::StatisticsNames>>(channels_).matches(msg.channelId)) {
+          auto& ch = std::get<Channel<plotjuggler_msgs::msg::StatisticsNames>>(channels_);
+          ch.read(msg);
+
+          out.type = ExtractedEvent::Type::Names;
+          out.names = ch.getMessage();
+          ++(*current_message_);
+          return true;
+        }
+
+        // Check if this is a Values message
+        if (std::get<Channel<plotjuggler_msgs::msg::StatisticsValues>>(channels_).matches(msg.channelId)) {
+          auto& ch = std::get<Channel<plotjuggler_msgs::msg::StatisticsValues>>(channels_);
+          ch.read(msg);
+
+          out.type = ExtractedEvent::Type::Values;
+          out.values = ch.getMessage();
+          ++(*current_message_);
+          return true;
+        }
+
+        // else: unrelated channel → skip
+        ++(*current_message_);
+      }
+      return false;
+    }
+
+    /// Public API: converts ExtractedEvent to Message
+    /// Returns exactly one message per call - either Names or Values
+    bool readNext(Message& message)
+    {
+      ExtractedEvent event;
+
+      if (!readNextInternal(event)) {
         return false;
       }
 
-      // Reset data flags
-      std::get<Channel<plotjuggler_msgs::msg::StatisticsNames>>(channels_).has_data_ = false;
-      std::get<Channel<plotjuggler_msgs::msg::StatisticsValues>>(channels_).has_data_ = false;
+      if (event.type == ExtractedEvent::Type::Names) {
+        // Return a Names message
+        const auto& names_msg = event.names;
+        message.names() = names_msg.names();
+        message.setVersion(names_msg.names_version());
 
-      // Read messages until we get a values message (which is what we return)
-      while (hasNext()) {
-        const mcap::MessageView& msg_view = **current_message_;
-        ++(*current_message_);
+        // Set timestamp from the names message
+        const auto& stamp = names_msg.header().stamp();
+        const uint64_t timestamp = static_cast<uint64_t>(stamp.sec()) * std::nano::den + static_cast<uint64_t>(stamp.nanosec());
+        message.setStamp(timestamp);
 
-        readIfMatches<plotjuggler_msgs::msg::StatisticsNames>(msg_view.message);
-        readIfMatches<plotjuggler_msgs::msg::StatisticsValues>(msg_view.message);
+        // Clear values since this is a Names message
+        message.values().clear();
+        return true;
+      } else if (event.type == ExtractedEvent::Type::Values) {
+        // Return a Values message
+        const auto& values_msg = event.values;
+        message.values() = values_msg.values();
 
-        // If we got a names message, update the version tracking
-        if (std::get<Channel<plotjuggler_msgs::msg::StatisticsNames>>(channels_).has_data_) {
-          const auto& names_msg = std::get<Channel<plotjuggler_msgs::msg::StatisticsNames>>(channels_).getMessage();
-          if (names_msg.names_version() != current_names_version_) {
-            current_names_version_ = names_msg.names_version();
-            names_updated_ = true;
+        // Set timestamp from the values message
+        const auto& stamp = values_msg.header().stamp();
+        const uint64_t timestamp = static_cast<uint64_t>(stamp.sec()) * std::nano::den + static_cast<uint64_t>(stamp.nanosec());
+        message.setStamp(timestamp);
 
-            // Copy names to output message
-            message.names() = names_msg.names();
-            message.setVersion(current_names_version_);
-          }
-        }
-
-        // If we got a values message, we can return
-        if (std::get<Channel<plotjuggler_msgs::msg::StatisticsValues>>(channels_).has_data_) {
-          const auto& values_msg = std::get<Channel<plotjuggler_msgs::msg::StatisticsValues>>(channels_).getMessage();
-
-          // Copy values to output message
-          message.values() = values_msg.values();
-
-          // Set timestamp from the values message
-          const auto& stamp = values_msg.header().stamp();
-          const uint64_t timestamp = static_cast<uint64_t>(stamp.sec()) * std::nano::den + static_cast<uint64_t>(stamp.nanosec());
-          message.setStamp(timestamp);
-
-          names_updated_ = false;
-          return true;
-        }
+        // Clear names since this is a Values message
+        message.names().clear();
+        return true;
       }
 
       return false;
@@ -200,9 +239,9 @@ namespace pjmsg_mcap_wrapper
     pimpl_->initialize(filename);
   }
 
-  bool Reader::read(Message& message)
+  bool Reader::readNext(Message& message)
   {
-    return pimpl_->read(message);
+    return pimpl_->readNext(message);
   }
 
   bool Reader::hasNext() const

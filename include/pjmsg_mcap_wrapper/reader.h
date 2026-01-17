@@ -20,8 +20,13 @@ namespace pjmsg_mcap_wrapper
   public:
     Reader();
     ~Reader();
+
     void initialize(const std::filesystem::path& filename);
-    bool read(Message& message);
+
+    /// Returns exactly one decoded MCAP message
+    /// Skips unrelated channels
+    bool readNext(Message& message);
+
     [[nodiscard]] bool hasNext() const;
   };
 } // namespace pjmsg_mcap_wrapper
