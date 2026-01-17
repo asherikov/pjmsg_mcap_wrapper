@@ -112,6 +112,12 @@ namespace pjmsg_mcap_wrapper
     pimpl_->values_.header().stamp().nanosec(nanosec);
   }
 
+  uint64_t Message::getStamp() const
+  {
+    const auto& stamp = pimpl_->values_.header().stamp();
+    return static_cast<uint64_t>(stamp.sec()) * std::nano::den + static_cast<uint64_t>(stamp.nanosec());
+  }
+
   void Message::reserve(const std::size_t size)
   {
     pimpl_->names_.names().reserve(size);
