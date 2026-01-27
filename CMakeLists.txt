@@ -21,6 +21,7 @@ endif()
 set(CMAKE_CXX_VISIBILITY_PRESET hidden)
 set(CMAKE_VISIBILITY_INLINES_HIDDEN hidden)
 
+find_package(zstd REQUIRED)
 
 add_subdirectory(src/3rdparty/)
 
@@ -34,6 +35,7 @@ add_library(${PROJECT_NAME} SHARED
 )
 target_link_libraries(${PROJECT_NAME}
     PRIVATE fastcdr
+    PUBLIC zstd
 )
 target_include_directories(${PROJECT_NAME} SYSTEM PUBLIC
     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
