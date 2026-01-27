@@ -3,8 +3,6 @@
     @author  Alexander Sherikov
     @copyright 2024 Alexander Sherikov. Licensed under the Apache License,
     Version 2.0. (see LICENSE or http://www.apache.org/licenses/LICENSE-2.0)
-
-    @brief Sink class.
 */
 
 #pragma once
@@ -12,8 +10,9 @@
 #include <filesystem>
 #include <vector>
 
-#define PJMSG_MCAP_WRAPPER_PUBLIC __attribute__((visibility("default")))
-
+#ifndef PJMSG_MCAP_WRAPPER_PUBLIC
+#    define PJMSG_MCAP_WRAPPER_PUBLIC __attribute__((visibility("default")))
+#endif
 
 namespace pjmsg_mcap_wrapper
 {
@@ -47,6 +46,18 @@ namespace pjmsg_mcap_wrapper
 
     class PJMSG_MCAP_WRAPPER_PUBLIC Writer
     {
+    public:
+        struct PJMSG_MCAP_WRAPPER_PUBLIC Parameters
+        {
+            enum class PJMSG_MCAP_WRAPPER_PUBLIC Compression
+            {
+                NONE,
+                ZSTD
+            } compression_ = Compression::NONE;
+
+            Parameters(){};
+        };
+
     protected:
         class Implementation;
 
@@ -56,7 +67,10 @@ namespace pjmsg_mcap_wrapper
     public:
         Writer();
         ~Writer();
-        void initialize(const std::filesystem::path &filename, const std::string &topic_prefix);
+        void initialize(
+                const std::filesystem::path &filename,
+                const std::string &topic_prefix,
+                const Parameters &params = Parameters{});
         void flush();
         void write(const Message &message);
     };

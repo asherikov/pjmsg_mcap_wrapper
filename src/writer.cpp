@@ -15,7 +15,6 @@
 
 #define MCAP_IMPLEMENTATION
 #define MCAP_COMPRESSION_NO_LZ4
-#define MCAP_COMPRESSION_NO_ZSTD
 #define MCAP_PUBLIC __attribute__((visibility("hidden")))
 
 #pragma GCC diagnostic push
@@ -241,12 +240,28 @@ namespace pjmsg_mcap_wrapper
             writer_.close();
         }
 
-        void initialize(const std::filesystem::path &filename, const std::string &topic_prefix)
+        void initialize(
+                const std::filesystem::path &filename,
+                const std::string &topic_prefix,
+                const Writer::Parameters &params)
         {
             {
                 mcap::McapWriterOptions options = mcap::McapWriterOptions("ros2msg");
-                /// @todo needed if compression is used, delays writing
-                options.noChunking = true;
+
+                // Set compression based on parameters
+                switch (params.compression_)
+                {
+                    case Writer::Parameters::Compression::ZSTD:
+                        options.noChunking = false;
+                        options.compression = mcap::Compression::Zstd;
+                        break;
+                    case Writer::Parameters::Compression::NONE:
+                    default:
+                        options.noChunking = true;
+                        options.compression = mcap::Compression::None;
+                        break;
+                }
+
                 const mcap::Status res = writer_.open(filename.native(), options);
                 if (not res.ok())
                 {
@@ -279,9 +294,12 @@ namespace pjmsg_mcap_wrapper
 
     Writer::~Writer() = default;
 
-    void Writer::initialize(const std::filesystem::path &filename, const std::string &topic_prefix)
+    void Writer::initialize(
+            const std::filesystem::path &filename,
+            const std::string &topic_prefix,
+            const Writer::Parameters &params)
     {
-        pimpl_->initialize(filename, topic_prefix);
+        pimpl_->initialize(filename, topic_prefix, params);
     }
 
     void Writer::flush()

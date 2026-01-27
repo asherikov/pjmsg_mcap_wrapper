@@ -90,6 +90,8 @@ file(
     WRITE
     "${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}Config.cmake"
     "include(\"\${CMAKE_CURRENT_LIST_DIR}/${PROJECT_NAME}Targets.cmake\")\n"
+    "include(CMakeFindDependencyMacro)\n"
+    "find_dependency(zstd REQUIRED)\n"
 )
 
 install(
