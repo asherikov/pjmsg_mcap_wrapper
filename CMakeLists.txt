@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.8)
-project(pjmsg_mcap_wrapper VERSION 0.1.0 LANGUAGES CXX)
+project(pjmsg_mcap_wrapper VERSION 0.1.2 LANGUAGES CXX)
 
 if(CCWS_CXX_FLAGS)
     set (CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${CCWS_CXX_FLAGS}")
@@ -21,7 +21,14 @@ endif()
 set(CMAKE_CXX_VISIBILITY_PRESET hidden)
 set(CMAKE_VISIBILITY_INLINES_HIDDEN hidden)
 
-find_package(zstd REQUIRED)
+find_package(zstd)
+if(zstd_FOUND)
+    set(ZSTD_FIND_DEPENDENCY "include(CMakeFindDependencyMacro)\nfind_dependency(zstd)\n")
+else()
+    # quick workaround for old systems
+    find_path(ZSTD_INCLUDE_DIR zstd.h REQUIRED)
+    find_library(ZSTD_LIBRARIES NAMES zstd REQUIRED)
+endif()
 
 add_subdirectory(src/3rdparty/)
 
@@ -35,12 +42,26 @@ add_library(${PROJECT_NAME} SHARED
 )
 target_link_libraries(${PROJECT_NAME}
     PRIVATE fastcdr
-    PUBLIC zstd
 )
 target_include_directories(${PROJECT_NAME} SYSTEM PUBLIC
     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:include>
 )
+
+if(zstd_FOUND)
+    target_link_libraries(${PROJECT_NAME}
+        PUBLIC zstd
+    )
+else()
+    target_link_libraries(${PROJECT_NAME}
+        PUBLIC ${ZSTD_LIBRARIES}
+    )
+    target_include_directories(${PROJECT_NAME}
+        SYSTEM
+        PUBLIC ${ZSTD_INCLUDE_DIR}
+    )
+endif()
+
 target_include_directories(${PROJECT_NAME}
     SYSTEM
     PRIVATE include/${PROJECT_NAME}/generated/
@@ -92,8 +113,7 @@ file(
     WRITE
     "${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}Config.cmake"
     "include(\"\${CMAKE_CURRENT_LIST_DIR}/${PROJECT_NAME}Targets.cmake\")\n"
-    "include(CMakeFindDependencyMacro)\n"
-    "find_dependency(zstd REQUIRED)\n"
+    "${ZSTD_FIND_DEPENDENCY}"
 )
 
 install(

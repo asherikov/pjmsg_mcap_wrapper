@@ -1,7 +1,17 @@
 on: [push, pull_request]
 
 jobs:
-    tests:
+    tests_jammy:
+        uses: asherikov/ccws/.github/workflows/reusable_test.yaml@master
+        with:
+            distro: jammy
+            workspace_github_repo: asherikov/sharf
+            workspace_version: main
+            package_github_repo: ${{ github.repository }}
+            package_version: ${{ github.sha }}
+            build_target: intrometry
+
+    tests_noble:
         uses: asherikov/ccws/.github/workflows/reusable_test.yaml@master
         with:
             distro: noble
