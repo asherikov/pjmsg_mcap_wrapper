@@ -30,6 +30,7 @@ else()
     find_library(ZSTD_LIBRARIES NAMES zstd REQUIRED)
 endif()
 
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 add_subdirectory(src/3rdparty/)
 
 if(CCWS_CLANG_TIDY)
