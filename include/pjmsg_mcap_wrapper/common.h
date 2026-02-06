@@ -7,4 +7,9 @@
 
 #pragma once
 
-#include "writer.h"
+#include <filesystem>
+#include <vector>
+
+#ifndef PJMSG_MCAP_WRAPPER_PUBLIC
+#    define PJMSG_MCAP_WRAPPER_PUBLIC __attribute__((visibility("default")))
+#endif
