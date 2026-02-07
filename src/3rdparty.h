@@ -13,6 +13,8 @@
 #include "StatisticsValuesCdrAux.hpp"
 #include "TimeCdrAux.hpp"
 
-#define MCAP_IMPLEMENTATION
+#include <fastcdr/Cdr.h>
+#include <fastcdr/CdrSizeCalculator.hpp>
+
 #define MCAP_COMPRESSION_NO_LZ4
 #define MCAP_PUBLIC __attribute__((visibility("hidden")))

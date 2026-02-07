@@ -12,11 +12,6 @@
 #include "message_impl.h"
 #include "plotjuggler_msgs.h"
 
-#include "HeaderCdrAux.ipp"
-#include "StatisticsNamesCdrAux.ipp"
-#include "StatisticsValuesCdrAux.ipp"
-#include "TimeCdrAux.ipp"
-
 #pragma GCC diagnostic push
 /// @todo presumably GCC bug
 #pragma GCC diagnostic ignored "-Warray-bounds"
