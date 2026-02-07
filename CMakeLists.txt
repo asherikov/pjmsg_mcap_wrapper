@@ -41,6 +41,7 @@ endif()
 add_library(${PROJECT_NAME} SHARED
     src/message.cpp
     src/writer.cpp
+    src/reader.cpp
     src/3rdparty.cpp
 )
 target_link_libraries(${PROJECT_NAME}
