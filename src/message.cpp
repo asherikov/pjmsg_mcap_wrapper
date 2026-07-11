@@ -103,12 +103,12 @@ namespace pjmsg_mcap_wrapper
 
     std::string &Message::name(const std::size_t index)
     {
-        return (names()[index]);
+        return (names()[index]); // NOLINT
     }
 
     double &Message::value(const std::size_t index)
     {
-        return (values()[index]);
+        return (values()[index]); // NOLINT
     }
 
     std::size_t Message::size() const
