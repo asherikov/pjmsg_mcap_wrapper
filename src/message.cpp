@@ -120,4 +120,9 @@ namespace pjmsg_mcap_wrapper
     {
         pimpl_->setVersion(version);
     }
+
+    uint32_t Message::getVersion() const
+    {
+        return (pimpl_->names_.names_version());
+    }
 }  // namespace pjmsg_mcap_wrapper

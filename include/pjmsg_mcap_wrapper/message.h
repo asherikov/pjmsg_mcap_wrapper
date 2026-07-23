@@ -30,6 +30,7 @@ namespace pjmsg_mcap_wrapper
 
         void bumpVersion();
         void setVersion(const uint32_t version);
+        uint32_t getVersion() const;
 
         void setStamp(const uint64_t timestamp);
         [[nodiscard]] uint64_t getStamp() const;
