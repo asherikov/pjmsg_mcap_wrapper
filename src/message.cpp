@@ -91,7 +91,7 @@ namespace pjmsg_mcap_wrapper
 
     void Message::reset(const Message& reference, const bool updated)
     {
-        pimpl_->names_.names() = reference.pimpl_->names_.names();
+        pimpl_->names_.names().resize(reference.pimpl_->names_.names().size());
         pimpl_->values_.values().resize(pimpl_->names_.names().size());
 
         pimpl_->names_.names_version() = reference.pimpl_->names_.names_version();
