@@ -35,6 +35,7 @@ namespace pjmsg_mcap_wrapper
         void setStamp(const uint64_t timestamp);
         [[nodiscard]] uint64_t getStamp() const;
 
+        void reset(const Message &reference, const bool updated = false);
         void reserve(const std::size_t size);
         void resize(const std::size_t size);
         [[nodiscard]] std::size_t size() const;

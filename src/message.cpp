@@ -89,6 +89,17 @@ namespace pjmsg_mcap_wrapper
                + pimpl_->values_.header().stamp().nanosec();
     }
 
+    void Message::reset(const Message& reference, const bool updated)
+    {
+        pimpl_->names_.names() = reference.pimpl_->names_.names();
+        pimpl_->values_.values().resize(pimpl_->names_.names().size());
+
+        pimpl_->names_.names_version() = reference.pimpl_->names_.names_version();
+        pimpl_->values_.names_version(pimpl_->names_.names_version());
+
+        pimpl_->version_updated_ = updated;
+    }
+
     void Message::reserve(const std::size_t size)
     {
         pimpl_->names_.names().reserve(size);
