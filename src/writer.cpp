@@ -119,8 +119,9 @@ namespace pjmsg_mcap_wrapper
                     {
                         writer_.terminate();
                     }
-                    catch (...)
+                    catch (...)  // NOLINT
                     {
+                        // better conceal an error than risk crashing the user application
                     }
                 }
             }
