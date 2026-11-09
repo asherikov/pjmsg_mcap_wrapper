@@ -20,10 +20,12 @@
 #include <cstdint>
 #include <limits>
 #include <map>
+#include <memory>
 #include <vector>
 
 #include "fastcdr_dll.h"
 
+#include "CdrContext.hpp"
 #include "CdrEncoding.hpp"
 #include "cdr/fixed_size_string.hpp"
 #include "detail/container_recursive_inspector.hpp"
@@ -62,11 +64,33 @@ public:
 
     /*!
      * @brief Constructor.
+     * @param[in] context Shared pointer to a CdrContext object that will be used during the encoding.
+     * @param[in] cdr_version Represents the version of the encoding algorithm that will be used for the encoding.
+     * The default value is CdrVersion::XCDRv2.
+     */
+    Cdr_DllAPI CdrSizeCalculator(
+            const std::shared_ptr<CdrContext>& context,
+            CdrVersion cdr_version);
+
+    /*!
+     * @brief Constructor.
      * @param[in] cdr_version Represents the version of the encoding algorithm that will be used for the encoding.
      * The default value is CdrVersion::XCDRv2.
      * @param[in] encoding Represents the initial encoding.
      */
     Cdr_DllAPI CdrSizeCalculator(
+            CdrVersion cdr_version,
+            EncodingAlgorithmFlag encoding);
+
+    /*!
+     * @brief Constructor.
+     * @param[in] context Shared pointer to a CdrContext object that will be used during the encoding.
+     * @param[in] cdr_version Represents the version of the encoding algorithm that will be used for the encoding.
+     * The default value is CdrVersion::XCDRv2.
+     * @param[in] encoding Represents the initial encoding.
+     */
+    Cdr_DllAPI CdrSizeCalculator(
+            const std::shared_ptr<CdrContext>& context,
             CdrVersion cdr_version,
             EncodingAlgorithmFlag encoding);
 
@@ -81,6 +105,12 @@ public:
      * @return Configured EncodingAlgorithmFlag.
      */
     Cdr_DllAPI EncodingAlgorithmFlag get_encoding() const;
+
+    /*!
+     * @brief Retrieves the context configured for the instance.
+     * @return The context.
+     */
+    Cdr_DllAPI std::shared_ptr<CdrContext> get_context() const;
 
     /*!
      * @brief Generic template which calculates the encoded size of an instance of an unknown type.
@@ -480,7 +510,7 @@ public:
      * @param[inout] current_alignment Current alignment in the encoding.
      * @return Encoded size of the instance.
      */
-    template <size_t MAX_CHARS>
+    template<size_t MAX_CHARS>
     size_t calculate_serialized_size(
             const fixed_string<MAX_CHARS>& data,
             size_t& current_alignment)
@@ -1065,7 +1095,11 @@ public:
             size_t num_elements,
             size_t& current_alignment)
     {
-        return calculate_array_serialized_size(data->data(), num_elements * data->size(), current_alignment);
+        if (num_elements == 0 || data == nullptr)
+        {
+            return 0;
+        }
+        return calculate_array_serialized_size(data->data(), num_elements * _N, current_alignment);
     }
 
     /*!
@@ -1245,12 +1279,14 @@ public:
         if (CdrVersion::XCDRv2 == cdr_version_ && EncodingAlgorithmFlag::PL_CDR2 == current_encoding_ &&
                 0 < calculated_size)
         {
-            if (8 < calculated_size)
+            if (8 < calculated_size ||
+                    (1 != calculated_size && 2 != calculated_size && 4 != calculated_size &&
+                    8 != calculated_size))
             {
                 extra_size = 8; // Long EMHEADER.
                 if (NO_SERIALIZED_MEMBER_SIZE != serialized_member_size_)
                 {
-                    extra_size -= 4; // Join NEXTINT and DHEADER.
+                    calculated_size -= 4; // Join NEXTINT and DHEADER.
                 }
             }
             else
@@ -1320,6 +1356,9 @@ private:
 
     //! Align for types equal or greater than 64bits.
     size_t align64_ {4};
+
+    //! Custom serialization context.
+    std::shared_ptr<CdrContext> context_;
 
     inline size_t alignment(
             size_t current_alignment,

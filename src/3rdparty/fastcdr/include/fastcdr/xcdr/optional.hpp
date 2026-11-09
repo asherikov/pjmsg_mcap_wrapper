@@ -72,20 +72,31 @@ public:
     optional(
             const optional<T>& val) noexcept
     {
-        ::new(&storage_.val_)T(val.storage_.val_);
-        storage_.engaged_ = val.storage_.engaged_;
+        if (val.storage_.engaged_)
+        {
+            ::new(&storage_.val_)T(val.storage_.val_);
+            storage_.engaged_ = true;
+        }
     }
 
     //! Move constructor.
     optional(
             optional<T>&& val) noexcept
     {
-        ::new(&storage_.val_)T(std::move(val.storage_.val_));
-        storage_.engaged_ = val.storage_.engaged_;
+        if (val.storage_.engaged_)
+        {
+            ::new(&storage_.val_)T(std::move(val.storage_.val_));
+            storage_.engaged_ = true;
+        }
     }
 
     //! Destructor
-    ~optional() = default;
+    ~optional()
+#if defined(__GNUC__) && __GNUC__ >= 12
+    __attribute__(
+        (noinline))
+#endif // if defined(__GNUC__) && __GNUC__ >= 12
+    = default;
 
     /*!
      * @brief Constructs the contained value in-place
@@ -201,6 +212,10 @@ public:
     //! Assigns content from an optional.
     optional& operator =(
             const optional& opt)
+#if defined(__GNUC__) && __GNUC__ >= 12
+    __attribute__(
+            (noinline))
+#endif // if defined(__GNUC__) && __GNUC__ >= 12
     {
         reset();
         storage_.engaged_ = opt.storage_.engaged_;
@@ -214,6 +229,10 @@ public:
     //! Assigns content from an optional.
     optional& operator =(
             optional&& opt)
+#if defined(__GNUC__) && __GNUC__ >= 12
+    __attribute__(
+            (noinline))
+#endif // if defined(__GNUC__) && __GNUC__ >= 12
     {
         reset();
         storage_.engaged_ = opt.storage_.engaged_;
@@ -298,7 +317,7 @@ public:
      *
      * @return The contained value.
      */
-    T&& operator *() && noexcept
+    T && operator *() && noexcept
     {
         return std::move(storage_.val_);
     }
@@ -310,7 +329,7 @@ public:
      *
      * @return The contained value.
      */
-    const T&& operator *() const&& noexcept
+    const T && operator*() const && noexcept
     {
         return std::move(storage_.val_);
     }

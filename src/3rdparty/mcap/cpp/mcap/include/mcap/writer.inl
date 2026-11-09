@@ -1,7 +1,11 @@
 #include "crc32.hpp"
 #include <algorithm>
+#include <array>
 #include <cassert>
+#include <cerrno>
+#include <cstring>
 #include <iostream>
+#include <system_error>
 #ifndef MCAP_COMPRESSION_NO_LZ4
 #  include <lz4frame.h>
 #  include <lz4hc.h>
@@ -55,9 +59,15 @@ Status FileWriter::open(std::string_view filename) {
 
 void FileWriter::handleWrite(const std::byte* data, uint64_t size) {
   assert(file_);
+  errno = 0;
   const size_t written = std::fwrite(data, 1, size, file_);
-  (void)written;
-  assert(written == size);
+  if (written != size) {
+    const auto error = errno == 0 ? std::make_error_code(std::errc::io_error)
+                                  : std::error_code(errno, std::generic_category());
+    const auto message =
+      internal::StrCat("failed to write ", size, " bytes (", written, " bytes written)");
+    throw std::system_error(error, message);
+  }
   size_ += size;
 }
 
@@ -111,6 +121,10 @@ void IChunkWriter::clear() {
 
 // BufferWriter //////////////////////////////////////////////////////////////
 
+BufferWriter::BufferWriter(uint64_t chunkSize) {
+  buffer_.reserve(chunkSize);
+}
+
 void BufferWriter::handleWrite(const std::byte* data, uint64_t size) {
   buffer_.insert(buffer_.end(), data, data + size);
 }
@@ -153,10 +167,12 @@ int LZ4CompressionLevel(CompressionLevel level) {
     case CompressionLevel::Fastest:
       return -1;  // "fast acceleration"
     case CompressionLevel::Fast:
-      return 0;  // "fast mode"
     case CompressionLevel::Default:
     default:
-      return LZ4HC_CLEVEL_DEFAULT;
+      // Fast mode, matching the default of the other MCAP writer implementations (Go, Rust,
+      // Python). LZ4HC remains available through Slow/Slowest for callers that prefer ratio
+      // over the speed that makes LZ4 worth choosing.
+      return 0;  // "fast mode"
     case CompressionLevel::Slow:
       return LZ4HC_CLEVEL_OPT_MIN;
     case CompressionLevel::Slowest:
@@ -229,7 +245,7 @@ int ZStdCompressionLevel(CompressionLevel level) {
       return -3;
     case CompressionLevel::Default:
     default:
-      return 1;
+      return 3;
     case CompressionLevel::Slow:
       return 5;
     case CompressionLevel::Slowest:
@@ -313,7 +329,7 @@ void McapWriter::open(IWritable& writer, const McapWriterOptions& options) {
   switch (compression_) {
     case Compression::None:
     default:
-      uncompressedChunk_ = std::make_unique<BufferWriter>();
+      uncompressedChunk_ = std::make_unique<BufferWriter>(chunkSize_);
       break;
 #ifndef MCAP_COMPRESSION_NO_LZ4
     case Compression::Lz4:
@@ -328,10 +344,10 @@ void McapWriter::open(IWritable& writer, const McapWriterOptions& options) {
   }
   auto* chunkWriter = getChunkWriter();
   if (chunkWriter) {
-    chunkWriter->crcEnabled = !options.noChunkCRC;
-    if (chunkWriter->crcEnabled) {
-      chunkWriter->resetCrc();
-    }
+    // The chunk CRC is computed in a single pass over the buffered chunk data
+    // in writeChunk() rather than incrementally on every write, so the
+    // streaming CRC stays disabled here even when chunk CRCs are enabled.
+    chunkWriter->crcEnabled = false;
   }
   writer.crcEnabled = options.enableDataCRC;
   output_ = &writer;
@@ -395,19 +411,16 @@ void McapWriter::close() {
     ByteOffset schemaStart = fileOutput.size();
     if (!options_.noRepeatedSchemas) {
       // Write all schema records
-      for (const auto& schemaId : writtenSchemas_) {
-        write(fileOutput, schemas_[schemaId - 1]);
+      for (const auto& schema : schemas_) {
+        write(fileOutput, schema);
       }
     }
 
     ByteOffset channelStart = fileOutput.size();
     if (!options_.noRepeatedChannels) {
-      // Write all channel records, but only if they appeared in this file
-      auto& channelMessageCounts = statistics_.channelMessageCounts;
+      // Write all channel records
       for (const auto& channel : channels_) {
-        if (channelMessageCounts.find(channel.id) != channelMessageCounts.end()) {
-          write(fileOutput, channel);
-        }
+        write(fileOutput, channel);
       }
     }
 
@@ -444,7 +457,7 @@ void McapWriter::close() {
     if (!options_.noSummaryOffsets) {
       // Write summary offset records
       summaryOffsetStart = fileOutput.size();
-      if (!options_.noRepeatedSchemas && !writtenSchemas_.empty()) {
+      if (!options_.noRepeatedSchemas && !schemas_.empty()) {
         write(fileOutput, SummaryOffset{OpCode::Schema, schemaStart, channelStart - schemaStart});
       }
       if (!options_.noRepeatedChannels && !channels_.empty()) {
@@ -498,7 +511,13 @@ void McapWriter::terminate() {
   attachmentIndex_.clear();
   metadataIndex_.clear();
   chunkIndex_.clear();
-  statistics_ = {};
+  statistics_.messageCount = 0;
+  statistics_.chunkCount = 0;
+  statistics_.channelMessageCounts.clear();
+  statistics_.metadataCount = 0;
+  statistics_.attachmentCount = 0;
+  statistics_.messageStartTime = 0;
+  statistics_.messageEndTime = 0;
   writtenSchemas_.clear();
   currentMessageIndex_.clear();
   currentChunkStart_ = MaxTime;
@@ -515,11 +534,13 @@ void McapWriter::terminate() {
 void McapWriter::addSchema(Schema& schema) {
   schema.id = uint16_t(schemas_.size() + 1);
   schemas_.push_back(schema);
+  ++statistics_.schemaCount;
 }
 
 void McapWriter::addChannel(Channel& channel) {
   channel.id = uint16_t(channels_.size() + 1);
   channels_.push_back(channel);
+  ++statistics_.channelCount;
 }
 
 Status McapWriter::write(const Message& message) {
@@ -551,9 +572,6 @@ Status McapWriter::write(const Message& message) {
       // Write the Schema record
       uncompressedSize_ += write(output, schemas_[schemaIndex]);
       writtenSchemas_.insert(channel.schemaId);
-
-      // Update schema statistics
-      ++statistics_.schemaCount;
     }
 
     // Write the Channel record
@@ -561,17 +579,9 @@ Status McapWriter::write(const Message& message) {
 
     // Update channel statistics
     channelMessageCounts.emplace(message.channelId, 0);
-    ++statistics_.channelCount;
   }
 
-  // Before writing a message that would overflow the current chunk, close it.
   auto* chunkWriter = getChunkWriter();
-  if (chunkWriter != nullptr && /* Chunked? */
-      uncompressedSize_ != 0 && /* Current chunk is not empty/new? */
-      9 + getRecordSize(message) + uncompressedSize_ >= chunkSize_ /* Overflowing? */) {
-    auto& fileOutput = *output_;
-    writeChunk(fileOutput, *chunkWriter);
-  }
 
   // For the chunk-local message index.
   const uint64_t messageOffset = uncompressedSize_;
@@ -750,6 +760,15 @@ void McapWriter::writeChunk(IWritable& output, IChunkWriter& chunkData) {
   uint64_t compressedSize = uncompressedSize;
   const std::byte* compressedData = chunkData.data();
 
+  // Computed before end() so data()/size() unambiguously refer to the
+  // uncompressed buffer. One pass over the full buffer is roughly 2x faster
+  // than updating the CRC on each write, which is dominated by small
+  // (1-8 byte) record fields.
+  const uint32_t uncompressedCrc =
+    options_.noChunkCRC ? 0
+                        : internal::crc32Final(internal::crc32Update(
+                            internal::CRC32_INIT, chunkData.data(), chunkData.size()));
+
   if (options_.forceCompression || uncompressedSize >= MIN_COMPRESSION_SIZE) {
     // Flush any in-progress compression stream
     chunkData.end();
@@ -765,7 +784,6 @@ void McapWriter::writeChunk(IWritable& output, IChunkWriter& chunkData) {
   }
 
   const auto compressionStr = internal::CompressionString(compression);
-  const uint32_t uncompressedCrc = chunkData.crc();
 
   // Write the chunk
   const uint64_t chunkStartOffset = output.size();
@@ -910,13 +928,33 @@ uint64_t McapWriter::getRecordSize(const Message& message) {
 uint64_t McapWriter::write(IWritable& output, const Message& message) {
   const uint64_t recordSize = getRecordSize(message);
 
-  write(output, OpCode::Message);
-  write(output, recordSize);
-  write(output, message.channelId);
-  write(output, message.sequence);
-  write(output, message.logTime);
-  write(output, message.publishTime);
-  write(output, message.data, message.dataSize);
+  // Stage the fixed-size record header in one buffer so that the output
+  // receives two writes per message (header, payload). Each IWritable::write
+  // call updates the CRC when enabled and, for unchunked files, reaches the
+  // FileWriter/StreamWriter and its error check.
+  constexpr size_t HeaderSize = /* opcode */ 1 + /* record length */ 8 + /* channel id */ 2 +
+                                /* sequence */ 4 + /* log time */ 8 + /* publish time */ 8;
+  static_assert(sizeof(OpCode) + sizeof(recordSize) + sizeof(message.channelId) +
+                    sizeof(message.sequence) + sizeof(message.logTime) +
+                    sizeof(message.publishTime) ==
+                  HeaderSize,
+                "Message header layout does not match HeaderSize");
+  std::array<std::byte, HeaderSize> header;
+  size_t offset = 0;
+  const auto put = [&header, &offset](const auto& value) {
+    std::memcpy(header.data() + offset, &value, sizeof(value));
+    offset += sizeof(value);
+  };
+  put(OpCode::Message);
+  put(recordSize);
+  put(message.channelId);
+  put(message.sequence);
+  put(message.logTime);
+  put(message.publishTime);
+  assert(offset == HeaderSize);
+
+  output.write(header.data(), HeaderSize);
+  output.write(message.data, message.dataSize);
 
   return 9 + recordSize;
 }

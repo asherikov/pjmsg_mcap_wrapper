@@ -20,7 +20,7 @@ cmake_minimum_required(VERSION 3.20)
 ###############################################################################
 # Project                                                                     #
 ###############################################################################
-project(fastcdr VERSION 2.2.6 LANGUAGES CXX)
+project(fastcdr VERSION 2.4.0 LANGUAGES CXX)
 
 set(PROJECT_NAME_STYLED "FastCDR")
 set(PROJECT_NAME_LARGE "Fast CDR")

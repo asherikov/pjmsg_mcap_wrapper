@@ -14,7 +14,7 @@
 
 namespace mcap {
 
-#define MCAP_LIBRARY_VERSION "2.1.0"
+#define MCAP_LIBRARY_VERSION "2.2.0"
 
 using SchemaId = uint16_t;
 using ChannelId = uint16_t;
@@ -27,7 +27,7 @@ using ProblemCallback = std::function<void(const Status&)>;
 constexpr char SpecVersion = '0';
 constexpr char LibraryVersion[] = MCAP_LIBRARY_VERSION;
 constexpr uint8_t Magic[] = {137, 77, 67, 65, 80, SpecVersion, 13, 10};  // "\x89MCAP0\r\n"
-constexpr uint64_t DefaultChunkSize = 1024 * 768;
+constexpr uint64_t DefaultChunkSize = 1024 * 1024;
 constexpr ByteOffset EndOffset = std::numeric_limits<ByteOffset>::max();
 constexpr Timestamp MaxTime = std::numeric_limits<Timestamp>::max();
 
@@ -118,9 +118,9 @@ struct MCAP_PUBLIC Footer {
   uint32_t summaryCrc;
 
   Footer() = default;
-  Footer(ByteOffset summaryStart, ByteOffset summaryOffsetStart)
-      : summaryStart(summaryStart)
-      , summaryOffsetStart(summaryOffsetStart)
+  Footer(ByteOffset _summaryStart, ByteOffset _summaryOffsetStart)
+      : summaryStart(_summaryStart)
+      , summaryOffsetStart(_summaryOffsetStart)
       , summaryCrc(0) {}
 };
 
@@ -137,16 +137,17 @@ struct MCAP_PUBLIC Schema {
 
   Schema() = default;
 
-  Schema(const std::string_view name, const std::string_view encoding, const std::string_view data)
-      : name(name)
-      , encoding(encoding)
-      , data{reinterpret_cast<const std::byte*>(data.data()),
-             reinterpret_cast<const std::byte*>(data.data() + data.size())} {}
+  Schema(const std::string_view _name, const std::string_view _encoding,
+         const std::string_view _data)
+      : name(_name)
+      , encoding(_encoding)
+      , data{reinterpret_cast<const std::byte*>(_data.data()),
+             reinterpret_cast<const std::byte*>(_data.data() + _data.size())} {}
 
-  Schema(const std::string_view name, const std::string_view encoding, const ByteArray& data)
-      : name(name)
-      , encoding(encoding)
-      , data{data} {}
+  Schema(const std::string_view _name, const std::string_view _encoding, const ByteArray& _data)
+      : name(_name)
+      , encoding(_encoding)
+      , data{_data} {}
 };
 
 /**
@@ -165,12 +166,12 @@ struct MCAP_PUBLIC Channel {
 
   Channel() = default;
 
-  Channel(const std::string_view topic, const std::string_view messageEncoding, SchemaId schemaId,
-          const KeyValueMap& metadata = {})
-      : topic(topic)
-      , messageEncoding(messageEncoding)
-      , schemaId(schemaId)
-      , metadata(metadata) {}
+  Channel(const std::string_view _topic, const std::string_view _messageEncoding,
+          SchemaId _schemaId, const KeyValueMap& _metadata = {})
+      : topic(_topic)
+      , messageEncoding(_messageEncoding)
+      , schemaId(_schemaId)
+      , metadata(_metadata) {}
 };
 
 using SchemaPtr = std::shared_ptr<Schema>;
@@ -351,6 +352,16 @@ struct MCAP_PUBLIC DataEnd {
   uint32_t dataSectionCrc;
 };
 
+/**
+ * @brief The position of a record in an MCAP file. A record inside a chunk is identified by its
+ * offset within the decompressed chunk contents together with the file offset of the chunk
+ * record; a record outside any chunk is identified by its file offset alone.
+ *
+ * RecordOffsets are totally ordered by position in the file. Records are ordered by the file
+ * offset of the chunk that contains them (or their own file offset when not chunked); a plain
+ * file offset that names the start of a chunk sorts before every record inside that chunk; and
+ * records in the same chunk are ordered by their offset within it.
+ */
 struct MCAP_PUBLIC RecordOffset {
   ByteOffset offset;
   std::optional<ByteOffset> chunkOffset;
@@ -362,20 +373,29 @@ struct MCAP_PUBLIC RecordOffset {
       : offset(offset_)
       , chunkOffset(chunkOffset_) {}
 
-  bool operator==(const RecordOffset& other) const;
-  bool operator>(const RecordOffset& other) const;
+  /**
+   * @brief Three-way comparison: negative if this record precedes `other` in the file, zero if
+   * they name the same record, positive if this record follows `other`.
+   */
+  int compare(const RecordOffset& other) const;
 
-  bool operator!=(const RecordOffset& other) const {
-    return !(*this == other);
+  bool operator==(const RecordOffset& other) const {
+    return compare(other) == 0;
   }
-  bool operator>=(const RecordOffset& other) const {
-    return ((*this == other) || (*this > other));
+  bool operator!=(const RecordOffset& other) const {
+    return compare(other) != 0;
   }
   bool operator<(const RecordOffset& other) const {
-    return !(*this >= other);
+    return compare(other) < 0;
   }
   bool operator<=(const RecordOffset& other) const {
-    return !(*this > other);
+    return compare(other) <= 0;
+  }
+  bool operator>(const RecordOffset& other) const {
+    return compare(other) > 0;
+  }
+  bool operator>=(const RecordOffset& other) const {
+    return compare(other) >= 0;
   }
 };
 
@@ -391,11 +411,11 @@ struct MCAP_PUBLIC MessageView {
   const SchemaPtr schema;
   const RecordOffset messageOffset;
 
-  MessageView(const Message& message, const ChannelPtr channel, const SchemaPtr schema,
+  MessageView(const Message& _message, const ChannelPtr _channel, const SchemaPtr _schema,
               RecordOffset offset)
-      : message(message)
-      , channel(channel)
-      , schema(schema)
+      : message(_message)
+      , channel(_channel)
+      , schema(_schema)
       , messageOffset(offset) {}
 };
 
