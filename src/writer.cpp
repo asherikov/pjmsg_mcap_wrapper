@@ -107,7 +107,23 @@ namespace pjmsg_mcap_wrapper
     public:
         ~Implementation()
         {
-            writer_.close();
+            if (nullptr != writer_.dataSink())
+            {
+                try
+                {
+                    writer_.close();
+                }
+                catch (...)
+                {
+                    try
+                    {
+                        writer_.terminate();
+                    }
+                    catch (...)
+                    {
+                    }
+                }
+            }
         }
 
         void initialize(
@@ -174,7 +190,7 @@ namespace pjmsg_mcap_wrapper
 
     void Writer::flush()
     {
-        // pimpl_->writer_.closeLastChunk();
+        pimpl_->writer_.closeLastChunk(); // chunking is automatically enabled with compression
         pimpl_->writer_.dataSink()->flush();
     }
 
